@@ -102,7 +102,7 @@ export default async function DashboardPage() {
             icon: Wallet,
             label: "Earned (completed orders)",
             value: `KES ${(sellerStats?.totalAmount ?? 0).toLocaleString()}`,
-            sub: "M-Pesa payouts coming soon",
+            sub: `${sellerStats?.completed ?? 0} completed orders`,
           },
         ]
       : []),

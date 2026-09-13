@@ -73,68 +73,96 @@ export type OrderDetail = OrderListItem & {
   } | null;
 };
 
+const ORDER_FIELDS = `
+  id,
+  order_number,
+  order_type,
+  status,
+  total_amount,
+  platform_fee,
+  seller_amount,
+  currency,
+  delivery_time_days,
+  created_at,
+  completed_at,
+  cancelled_at,
+  buyer:profiles!orders_buyer_id_fkey(
+    id,
+    full_name,
+    avatar_url
+  ),
+  seller:profiles!orders_seller_id_fkey(
+    id,
+    full_name,
+    avatar_url
+  ),
+  service:services!orders_service_id_fkey(
+    id,
+    title,
+    slug
+  ),
+  job:jobs!orders_job_id_fkey(
+    id,
+    title,
+    slug
+  )
+`;
+
 export async function getUserOrders(
   userId: string,
   role: "buyer" | "seller" | "all" = "all",
 ): Promise<OrderListItem[]> {
   const supabase = await createClient();
 
-  let query = supabase
-    .from("orders")
-    .select(
-      `
-      id,
-      order_number,
-      order_type,
-      status,
-      total_amount,
-      platform_fee,
-      seller_amount,
-      currency,
-      delivery_time_days,
-      created_at,
-      completed_at,
-      cancelled_at,
-      buyer:profiles!orders_buyer_id_fkey(
-        id,
-        full_name,
-        avatar_url
-      ),
-      seller:profiles!orders_seller_id_fkey(
-        id,
-        full_name,
-        avatar_url
-      ),
-      service:services!orders_service_id_fkey(
-        id,
-        title,
-        slug
-      ),
-      job:jobs!orders_job_id_fkey(
-        id,
-        title,
-        slug
-      )
-    `,
-    )
-    .order("created_at", { ascending: false });
-
   if (role === "buyer") {
-    query = query.eq("buyer_id", userId);
-  } else if (role === "seller") {
-    query = query.eq("seller_id", userId);
-  } else {
-    query = query.or(`buyer_id.eq.${userId},seller_id.eq.${userId}`);
+    const { data } = await supabase
+      .from("orders")
+      .select(ORDER_FIELDS)
+      .eq("buyer_id", userId)
+      .order("created_at", { ascending: false });
+    return (data || []) as unknown as OrderListItem[];
   }
 
-  const { data, error } = await query;
-
-  if (error) {
-    console.error("Error fetching orders:", error.message);
-    return [];
+  if (role === "seller") {
+    const { data } = await supabase
+      .from("orders")
+      .select(ORDER_FIELDS)
+      .eq("seller_id", userId)
+      .order("created_at", { ascending: false });
+    return (data || []) as unknown as OrderListItem[];
   }
 
-  return (data || []) as unknown as OrderListItem[];
+  // role === "all": two separate queries, merged in JS.
+  const [buyerRes, sellerRes] = await Promise.all([
+    supabase
+      .from("orders")
+      .select(ORDER_FIELDS)
+      .eq("buyer_id", userId)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("orders")
+      .select(ORDER_FIELDS)
+      .eq("seller_id", userId)
+      .order("created_at", { ascending: false }),
+  ]);
+
+  const buyerOrders = (buyerRes.data || []) as unknown as OrderListItem[];
+  const sellerOrders = (sellerRes.data || []) as unknown as OrderListItem[];
+
+  // Deduplicate by id (in case the user is both buyer and seller on the
+  // same order, which shouldn't happen but is a safety net).
+  const seen = new Set<string>();
+  const merged: OrderListItem[] = [];
+  for (const order of [...buyerOrders, ...sellerOrders]) {
+    if (seen.has(order.id)) continue;
+    seen.add(order.id);
+    merged.push(order);
+  }
+  merged.sort(
+    (a, b) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  );
+  return merged;
 }
 
 export async function getOrderById(
@@ -147,41 +175,10 @@ export async function getOrderById(
     .from("orders")
     .select(
       `
-      id,
-      order_number,
-      order_type,
-      status,
-      total_amount,
-      platform_fee,
-      seller_amount,
-      currency,
-      delivery_time_days,
+      ${ORDER_FIELDS},
       requirements,
       buyer_notes,
-      package_type,
-      created_at,
-      completed_at,
-      cancelled_at,
-      buyer:profiles!orders_buyer_id_fkey(
-        id,
-        full_name,
-        avatar_url
-      ),
-      seller:profiles!orders_seller_id_fkey(
-        id,
-        full_name,
-        avatar_url
-      ),
-      service:services!orders_service_id_fkey(
-        id,
-        title,
-        slug
-      ),
-      job:jobs!orders_job_id_fkey(
-        id,
-        title,
-        slug
-      )
+      package_type
     `,
     )
     .eq("id", orderId)
@@ -275,12 +272,7 @@ export async function getOrderStats(userId: string, role: "buyer" | "seller") {
 
   if (error) {
     console.error("Error fetching order stats:", error.message);
-    return {
-      total: 0,
-      active: 0,
-      completed: 0,
-      totalAmount: 0,
-    };
+    return { total: 0, active: 0, completed: 0, totalAmount: 0 };
   }
 
   const orders = data || [];
@@ -301,10 +293,5 @@ export async function getOrderStats(userId: string, role: "buyer" | "seller") {
     .filter((o) => o.status === "completed")
     .reduce((sum, o) => sum + (o.total_amount || 0), 0);
 
-  return {
-    total: orders.length,
-    active,
-    completed,
-    totalAmount,
-  };
+  return { total: orders.length, active, completed, totalAmount };
 }
