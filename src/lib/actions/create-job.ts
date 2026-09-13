@@ -1,7 +1,6 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { getMarketplaceRole, canPostJobs } from "@/lib/auth/permissions";
 import { slugify } from "@/lib/utils/slug";
 import { revalidatePath } from "next/cache";
 
@@ -27,15 +26,14 @@ export async function createJob(
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role_choice, onboarding_role")
+    .select("is_buyer")
     .eq("id", user.id)
-    .maybeSingle();
+    .single();
 
-  const role = getMarketplaceRole(profile);
-
-  if (!canPostJobs(role)) {
+  if (!profile?.is_buyer) {
     return {
-      error: "Only buyers, businesses, and organizations can post jobs.",
+      error:
+        "Only buyers can post jobs. If you want to offer services, switch to seller mode.",
     };
   }
 
@@ -88,49 +86,12 @@ export async function createJob(
     return { error: "Maximum budget must be greater than minimum." };
   }
 
-  let businessId: string | null = null;
-  let organizationId: string | null = null;
-
-  if (role === "business") {
-    const { data: business } = await supabase
-      .from("business_profiles")
-      .select("id")
-      .eq("owner_id", user.id)
-      .maybeSingle();
-
-    if (!business) {
-      return {
-        error: "Complete your business profile before posting a job.",
-      };
-    }
-
-    businessId = business.id;
-  }
-
-  if (role === "organization") {
-    const { data: organization } = await supabase
-      .from("organization_profiles")
-      .select("id")
-      .eq("owner_id", user.id)
-      .maybeSingle();
-
-    if (!organization) {
-      return {
-        error: "Complete your organization profile before posting a job.",
-      };
-    }
-
-    organizationId = organization.id;
-  }
-
   const slug = slugify(title);
 
   const { data: job, error: jobError } = await supabase
     .from("jobs")
     .insert({
       buyer_id: user.id,
-      business_id: businessId,
-      organization_id: organizationId,
       title,
       slug,
       description,
@@ -153,8 +114,10 @@ export async function createJob(
     .single();
 
   if (jobError || !job) {
-    console.error("Error creating job:", jobError?.message);
-    return { error: "Could not post your job. Please try again." };
+    console.error("Error creating job:", jobError);
+    return {
+      error: `Could not post your job: ${jobError?.message || "unknown error"}`,
+    };
   }
 
   if (skillsRaw) {
@@ -187,17 +150,15 @@ export async function createJob(
       }
 
       if (skillId) {
-        await supabase.from("job_skills").upsert({
-          job_id: job.id,
-          skill_id: skillId,
-        });
+        await supabase
+          .from("job_skills")
+          .upsert({ job_id: job.id, skill_id: skillId });
       }
     }
   }
 
   revalidatePath("/jobs");
   revalidatePath("/dashboard");
-  revalidatePath("/dashboard/projects");
 
   return { success: true, jobSlug: job.slug };
 }

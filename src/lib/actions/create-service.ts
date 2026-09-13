@@ -1,7 +1,6 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { canCreateWorkerService, getMarketplaceRole } from "@/lib/auth/permissions";
 import { slugify } from "@/lib/utils/slug";
 import { revalidatePath } from "next/cache";
 
@@ -25,21 +24,6 @@ export async function createService(
     return { error: "You must be signed in to create a service." };
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role_choice, onboarding_role")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  const role = getMarketplaceRole(profile);
-
-  if (!canCreateWorkerService(role)) {
-    return {
-      error: "Only workers can create freelance services or offer their skills for hire.",
-    };
-  }
-
-  // ----- Basic details -----
   const title = (formData.get("title") as string)?.trim();
   const categoryId = (formData.get("categoryId") as string)?.trim();
   const description = (formData.get("description") as string)?.trim();
@@ -58,7 +42,6 @@ export async function createService(
     return { error: "Description must be at least 50 characters." };
   }
 
-  // ----- Pricing -----
   const pricingMode = (formData.get("pricingMode") as string) || "single";
   const startingPrice = formData.get("startingPrice") as string;
 
@@ -139,7 +122,6 @@ export async function createService(
     }
   }
 
-  // ----- Create the service -----
   const slug = slugify(title);
 
   const { data: service, error: serviceError } = await supabase
@@ -164,11 +146,12 @@ export async function createService(
     .single();
 
   if (serviceError || !service) {
-    console.error("Error creating service:", serviceError?.message);
-    return { error: "Could not create your service. Please try again." };
+    console.error("Error creating service:", serviceError);
+    return {
+      error: `Could not create your service: ${serviceError?.message || "unknown error"}`,
+    };
   }
 
-  // ----- Save packages -----
   if (packages.length > 0) {
     const { error: pkgError } = await supabase.from("service_packages").insert(
       packages.map((p) => ({
@@ -182,7 +165,6 @@ export async function createService(
     }
   }
 
-  // ----- Save images (URLs already uploaded client side) -----
   const imageUrlsRaw = (formData.get("imageUrls") as string) || "";
   const imageUrls = imageUrlsRaw
     .split(",")
@@ -203,7 +185,6 @@ export async function createService(
     }
   }
 
-  // ----- Save FAQs -----
   const faqsRaw = (formData.get("faqs") as string) || "";
   if (faqsRaw) {
     try {

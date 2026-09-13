@@ -100,8 +100,16 @@ type RawService = Omit<
   "business_name" | "business_logo_url" | "business_verified"
 > & {
   business:
-    | { name: string; logo_url: string | null; verification_status: string }
-    | { name: string; logo_url: string | null; verification_status: string }[]
+    | {
+        name: string;
+        logo_url: string | null;
+        verification_status: string;
+      }
+    | {
+        name: string;
+        logo_url: string | null;
+        verification_status: string;
+      }[]
     | null;
 };
 

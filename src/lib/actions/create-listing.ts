@@ -1,7 +1,6 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { canCreateListing, getMarketplaceRole } from "@/lib/auth/permissions";
 import { slugify } from "@/lib/utils/slug";
 import { revalidatePath } from "next/cache";
 
@@ -25,55 +24,22 @@ export async function createListing(
     return { error: "You must be signed in to add a listing." };
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role_choice, onboarding_role")
-    .eq("id", user.id)
+  const { data: business, error: businessError } = await supabase
+    .from("business_profiles")
+    .select("id")
+    .eq("owner_id", user.id)
     .maybeSingle();
 
-  const role = getMarketplaceRole(profile);
+  if (businessError) {
+    console.error("Failed to look up business:", businessError);
+    return { error: `Business lookup failed: ${businessError.message}` };
+  }
 
-  if (!canCreateListing(role)) {
+  if (!business) {
     return {
-      error: "Only business and organization accounts can create listings.",
+      error:
+        "You need to complete your business profile before adding listings.",
     };
-  }
-
-  let businessId: string | null = null;
-  let organizationId: string | null = null;
-
-  if (role === "business") {
-    const { data: business } = await supabase
-      .from("business_profiles")
-      .select("id")
-      .eq("owner_id", user.id)
-      .maybeSingle();
-
-    if (!business) {
-      return {
-        error:
-          "You need to complete your business profile before adding listings.",
-      };
-    }
-
-    businessId = business.id;
-  }
-
-  if (role === "organization") {
-    const { data: organization } = await supabase
-      .from("organization_profiles")
-      .select("id")
-      .eq("owner_id", user.id)
-      .maybeSingle();
-
-    if (!organization) {
-      return {
-        error:
-          "You need to complete your organization profile before adding listings.",
-      };
-    }
-
-    organizationId = organization.id;
   }
 
   const title = (formData.get("title") as string)?.trim();
@@ -107,38 +73,46 @@ export async function createListing(
 
   const slug = slugify(title);
 
+  const insertPayload = {
+    seller_id: user.id,
+    business_id: business.id,
+    title,
+    slug,
+    description,
+    category_id: categoryId,
+    starting_price: parsedPrice,
+    currency: "KES",
+    delivery_time_days: deliveryTimeDays
+      ? parseInt(deliveryTimeDays, 10)
+      : null,
+    revision_limit: revisionLimit ? parseInt(revisionLimit, 10) : 0,
+    is_remote: isRemote,
+    is_local: !isRemote,
+    location: location || null,
+    cover_url: coverUrl,
+    status: "published",
+    published_at: new Date().toISOString(),
+  };
+
+  console.log("Inserting listing:", {
+    seller_id: insertPayload.seller_id,
+    business_id: insertPayload.business_id,
+    slug: insertPayload.slug,
+  });
+
   const { data: listing, error: listingError } = await supabase
     .from("services")
-    .insert({
-      seller_id: user.id,
-      business_id: businessId,
-      organization_id: organizationId,
-      title,
-      slug,
-      description,
-      category_id: categoryId,
-      starting_price: parsedPrice,
-      currency: "KES",
-      delivery_time_days: deliveryTimeDays
-        ? parseInt(deliveryTimeDays, 10)
-        : null,
-      revision_limit: revisionLimit ? parseInt(revisionLimit, 10) : 0,
-      is_remote: isRemote,
-      is_local: !isRemote,
-      location: location || null,
-      cover_url: coverUrl,
-      status: "published",
-      published_at: new Date().toISOString(),
-    })
+    .insert(insertPayload)
     .select("id, slug")
     .single();
 
   if (listingError || !listing) {
-    console.error("Error creating listing:", listingError?.message);
-    return { error: "Could not create your listing. Please try again." };
+    console.error("Error creating listing:", listingError);
+    return {
+      error: `Could not create listing: ${listingError?.message || "unknown error"}`,
+    };
   }
 
-  // Save extra images
   const imageUrls = imageUrlsRaw
     .split(",")
     .map((u) => u.trim())
@@ -156,7 +130,6 @@ export async function createListing(
 
   revalidatePath("/services");
   revalidatePath("/dashboard/listings");
-  revalidatePath("/dashboard/organization-profile");
   revalidatePath("/dashboard");
 
   return { success: true, listingSlug: listing.slug };
