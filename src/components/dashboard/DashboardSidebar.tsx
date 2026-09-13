@@ -40,9 +40,11 @@ export function DashboardSidebar({
 }: DashboardSidebarProps) {
   const pathname = usePathname();
 
-  const isWorker = onboardingRole === "worker";
-  const isBusiness = onboardingRole === "business";
-  const isOrganization = onboardingRole === "organization";
+  const role = (onboardingRole || "").toLowerCase();
+  const isWorker = role === "worker";
+  const isBusiness = role === "business";
+  const isOrganization = role === "organization";
+  const isPlainBuyer = !isWorker && !isBusiness && !isOrganization && isBuyer;
 
   const links: {
     href: string;
@@ -73,7 +75,7 @@ export function DashboardSidebar({
     );
   }
 
-  if (isOrganization || (isBuyer && !isBusiness && !isWorker)) {
+  if (isOrganization || isPlainBuyer) {
     links.push({
       href: "/dashboard/projects",
       label: "My Jobs",
@@ -184,7 +186,7 @@ export function DashboardSidebar({
             </Link>
           )}
 
-          {(isOrganization || (isBuyer && !isBusiness && !isWorker)) && (
+          {(isOrganization || isPlainBuyer) && (
             <Link
               href="/post-job"
               className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-primary hover:bg-primary/5 transition-colors"
