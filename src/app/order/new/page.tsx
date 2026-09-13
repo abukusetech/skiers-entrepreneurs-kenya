@@ -1,33 +1,101 @@
-import Link from "next/link";
 import type { Metadata } from "next";
-import { ShoppingCart, ArrowRight } from "lucide-react";
+import { redirect, notFound } from "next/navigation";
+import Link from "next/link";
+import { createClient } from "@/lib/supabase/server";
+import { CheckoutForm } from "@/components/marketplace/CheckoutForm";
+import { ArrowLeft } from "lucide-react";
 
 export const metadata: Metadata = {
-  title: "New Order | SKIERS ENTREPRENEURS KENYA",
+  title: "Checkout",
 };
 
-export default function NewOrderPage() {
+export default async function NewOrderPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ service?: string }>;
+}) {
+  const { service: serviceId } = await searchParams;
+
+  if (!serviceId) {
+    notFound();
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect(`/login?redirect=/order/new?service=${serviceId}`);
+  }
+
+  const { data: service } = await supabase
+    .from("services")
+    .select(
+      "id, title, slug, starting_price, currency, delivery_time_days, revision_limit, seller_id, status, profiles:seller_id(full_name)",
+    )
+    .eq("id", serviceId)
+    .eq("status", "published")
+    .maybeSingle();
+
+  if (!service) {
+    notFound();
+  }
+
+  if (service.seller_id === user.id) {
+    redirect(`/service/${service.slug}`);
+  }
+
+  const { data: packages } = await supabase
+    .from("service_packages")
+    .select(
+      "id, package_type, title, description, price, delivery_time_days, revision_limit",
+    )
+    .eq("service_id", serviceId)
+    .order("price", { ascending: true });
+
+  const sellerName = Array.isArray(service.profiles)
+    ? service.profiles[0]?.full_name
+    : (service.profiles as { full_name?: string } | null)?.full_name;
+
   return (
-    <div className="min-h-screen bg-background-secondary flex items-center justify-center px-4 py-12">
-      <div className="w-full max-w-lg bg-white rounded-2xl border border-border shadow-xl p-8 lg:p-10 text-center">
-        <div className="w-16 h-16 rounded-2xl bg-primary/5 flex items-center justify-center mx-auto mb-6">
-          <ShoppingCart className="h-8 w-8 text-primary" />
-        </div>
-        <h1 className="text-2xl lg:text-3xl font-display font-bold text-text-primary mb-3">
-          Order flow coming soon
-        </h1>
-        <p className="text-text-secondary mb-8 leading-relaxed">
-          The full ordering and payment flow will be built in the next phase.
-          You will be able to select a package, enter requirements, and pay
-          securely with M-Pesa.
-        </p>
+    <div className="bg-background-secondary min-h-screen py-10">
+      <div className="container-site max-w-2xl">
         <Link
-          href="/services"
-          className="inline-flex items-center justify-center h-11 px-6 text-sm font-semibold rounded-md bg-primary text-white hover:bg-primary-hover transition-colors"
+          href={`/service/${service.slug}`}
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-text-secondary hover:text-primary mb-6"
         >
-          Back to services
-          <ArrowRight className="h-4 w-4 ml-2" />
+          <ArrowLeft className="h-4 w-4" /> Back to service
         </Link>
+
+        <div className="mb-6">
+          <h1 className="text-2xl lg:text-3xl font-display font-bold text-text-primary mb-1">
+            Order this service
+          </h1>
+          <p className="text-sm text-text-secondary">
+            {service.title} by {sellerName || "the seller"}
+          </p>
+        </div>
+
+        <CheckoutForm
+          service={{
+            id: service.id,
+            title: service.title,
+            currency: service.currency,
+            startingPrice: service.starting_price,
+            deliveryTimeDays: service.delivery_time_days,
+            revisionLimit: service.revision_limit,
+          }}
+          packages={(packages || []).map((p) => ({
+            id: p.id,
+            packageType: p.package_type,
+            title: p.title,
+            description: p.description,
+            price: p.price,
+            deliveryTimeDays: p.delivery_time_days,
+            revisionLimit: p.revision_limit,
+          }))}
+        />
       </div>
     </div>
   );

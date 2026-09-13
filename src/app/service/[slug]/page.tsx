@@ -2,6 +2,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
+import { createClient } from "@/lib/supabase/server";
 import { getServiceBySlug } from "@/lib/db/queries/services";
 import { getOrCreateConversation } from "@/lib/actions/messaging";
 import { Avatar } from "@/components/ui/Avatar";
@@ -14,6 +15,7 @@ import {
   Shield,
   RefreshCw,
   MapPin,
+  Info,
 } from "lucide-react";
 
 interface ServiceDetailPageProps {
@@ -46,8 +48,14 @@ export default async function ServiceDetailPage({
     notFound();
   }
 
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   const seller = service.seller;
   const category = service.category;
+  const isOwner = Boolean(user && seller && user.id === seller.id);
 
   const providerName = service.business_name || seller?.full_name || "Provider";
   const providerLogo = service.business_logo_url || seller?.avatar_url;
@@ -126,7 +134,7 @@ export default async function ServiceDetailPage({
 
             {service.images.length > 0 && (
               <div className="grid grid-cols-1 gap-4 mb-8">
-                <div className="relative aspect-16/10 rounded-2xl overflow-hidden shadow-lg">
+                <div className="relative aspect-video rounded-2xl overflow-hidden shadow-lg">
                   <Image
                     src={service.images[0].image_url}
                     alt={service.title}
@@ -279,37 +287,61 @@ export default async function ServiceDetailPage({
                 </div>
               </div>
 
-              <Link
-                href={`/order/new?service=${service.id}`}
-                className="inline-flex items-center justify-center gap-2 w-full h-12 rounded-md bg-primary text-white text-sm font-semibold hover:bg-primary-hover transition-colors mb-3"
-              >
-                Continue to order
-              </Link>
+              {isOwner ? (
+                <div className="bg-background-secondary rounded-xl p-4 flex items-start gap-3">
+                  <Info className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+                  <p className="text-xs text-text-secondary leading-relaxed">
+                    This is your own service. You cannot order it or message
+                    yourself. Manage it from{" "}
+                    <Link
+                      href="/dashboard/services"
+                      className="text-primary hover:underline"
+                    >
+                      your dashboard
+                    </Link>
+                    .
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <Link
+                    href={`/order/new?service=${service.id}`}
+                    className="inline-flex items-center justify-center gap-2 w-full h-12 rounded-md bg-primary text-white text-sm font-semibold hover:bg-primary-hover transition-colors mb-3"
+                  >
+                    Continue to order
+                  </Link>
 
-              <form
-                action={async () => {
-                  "use server";
-                  if (!seller?.id) return;
-                  const result = await getOrCreateConversation(seller.id, {
-                    serviceId: service.id,
-                  });
-                  if (result.conversationId) {
-                    redirect(`/dashboard/messages/${result.conversationId}`);
-                  }
-                }}
-              >
-                <button
-                  type="submit"
-                  className="inline-flex items-center justify-center gap-2 w-full h-12 rounded-md bg-transparent border border-border text-text-primary text-sm font-semibold hover:bg-background-secondary transition-colors"
-                >
-                  <MessageSquare className="h-4 w-4" />
-                  Contact seller
-                </button>
-              </form>
+                  <form
+                    action={async () => {
+                      "use server";
+                      if (!user) {
+                        redirect(`/login?redirect=/service/${service.slug}`);
+                      }
+                      if (!seller?.id) return;
+                      const result = await getOrCreateConversation(seller.id, {
+                        serviceId: service.id,
+                      });
+                      if (result.conversationId) {
+                        redirect(
+                          `/dashboard/messages/${result.conversationId}`,
+                        );
+                      }
+                    }}
+                  >
+                    <button
+                      type="submit"
+                      className="inline-flex items-center justify-center gap-2 w-full h-12 rounded-md bg-transparent border border-border text-text-primary text-sm font-semibold hover:bg-background-secondary transition-colors"
+                    >
+                      <MessageSquare className="h-4 w-4" />
+                      Contact seller
+                    </button>
+                  </form>
 
-              <p className="text-xs text-text-tertiary text-center mt-4">
-                You will not be charged yet.
-              </p>
+                  <p className="text-xs text-text-tertiary text-center mt-4">
+                    You will not be charged yet.
+                  </p>
+                </>
+              )}
             </div>
           </div>
         </div>

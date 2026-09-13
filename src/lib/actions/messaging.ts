@@ -9,9 +9,6 @@ export type MessagingState = {
   conversationId?: string;
 } | null;
 
-// Find an existing conversation between two users scoped to the same
-// context (job, service, or order). If none exists, create one with both
-// members.
 export async function getOrCreateConversation(
   otherUserId: string,
   context?: {
@@ -78,15 +75,24 @@ export async function getOrCreateConversation(
     return { error: "Could not start the conversation. Please try again." };
   }
 
-  const { error: membersError } = await supabase
+  // Insert the two members in TWO separate statements. The second insert
+  // sees the first one in the RLS check, so the WITH CHECK passes.
+  const { error: selfError } = await supabase
     .from("conversation_members")
-    .insert([
-      { conversation_id: created.id, profile_id: user.id },
-      { conversation_id: created.id, profile_id: otherUserId },
-    ]);
+    .insert({ conversation_id: created.id, profile_id: user.id });
 
-  if (membersError) {
-    console.error("Error adding members:", membersError.message);
+  if (selfError) {
+    console.error("Error adding self as member:", selfError.message);
+    await supabase.from("conversations").delete().eq("id", created.id);
+    return { error: "Could not add members to the conversation." };
+  }
+
+  const { error: otherError } = await supabase
+    .from("conversation_members")
+    .insert({ conversation_id: created.id, profile_id: otherUserId });
+
+  if (otherError) {
+    console.error("Error adding other member:", otherError.message);
     return { error: "Could not add members to the conversation." };
   }
 
