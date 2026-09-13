@@ -31,7 +31,10 @@ export async function getOrCreateConversation(
     return { error: "You cannot message yourself." };
   }
 
-  const query = supabase
+  // Build the search query. Only add filters for values that actually
+  // exist — never pass null to .eq(), because PostgREST treats that as
+  // the literal string "null" and Postgres rejects it for UUID columns.
+  let query = supabase
     .from("conversations")
     .select(
       `
@@ -39,10 +42,25 @@ export async function getOrCreateConversation(
       members:conversation_members(profile_id)
     `,
     )
-    .eq("job_id", context?.jobId ?? null)
-    .eq("service_id", context?.serviceId ?? null)
-    .eq("order_id", context?.orderId ?? null)
     .limit(50);
+
+  if (context?.jobId) {
+    query = query.eq("job_id", context.jobId);
+  } else {
+    query = query.is("job_id", null);
+  }
+
+  if (context?.serviceId) {
+    query = query.eq("service_id", context.serviceId);
+  } else {
+    query = query.is("service_id", null);
+  }
+
+  if (context?.orderId) {
+    query = query.eq("order_id", context.orderId);
+  } else {
+    query = query.is("order_id", null);
+  }
 
   const { data: candidates, error: searchError } = await query;
 
@@ -75,8 +93,8 @@ export async function getOrCreateConversation(
     return { error: "Could not start the conversation. Please try again." };
   }
 
-  // Insert the two members in TWO separate statements. The second insert
-  // sees the first one in the RLS check, so the WITH CHECK passes.
+  // Insert the two members in two separate statements so the second one
+  // sees the first, which satisfies the RLS policy.
   const { error: selfError } = await supabase
     .from("conversation_members")
     .insert({ conversation_id: created.id, profile_id: user.id });
