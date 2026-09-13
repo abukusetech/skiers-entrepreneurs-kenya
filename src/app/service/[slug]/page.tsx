@@ -317,7 +317,9 @@ export default async function ServiceDetailPage({
                       if (!user) {
                         redirect(`/login?redirect=/service/${service.slug}`);
                       }
-                      if (!seller?.id) return;
+                      if (!seller?.id) {
+                        return;
+                      }
                       const result = await getOrCreateConversation(seller.id, {
                         serviceId: service.id,
                       });
