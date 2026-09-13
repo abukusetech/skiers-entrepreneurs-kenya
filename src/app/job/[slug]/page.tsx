@@ -62,11 +62,11 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
   if (user) {
     const { data: profile } = await supabase
       .from("profiles")
-      .select("role_choice, onboarding_role")
+      .select("role_choice, is_seller, is_buyer")
       .eq("id", user.id)
       .single();
 
-    currentUserRole = profile?.role_choice || profile?.onboarding_role || null;
+    currentUserRole = profile?.role_choice || null;
 
     if (profile?.role_choice === "worker") {
       const { data: existingProposal } = await supabase
@@ -293,15 +293,18 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
                                 Message
                               </button>
                             </form>
+
                             <ViewCvButton
                               cvUrl={seller?.cv_url || null}
                               applicantName={seller?.full_name || "Applicant"}
                             />
+
                             {proposal.is_shortlisted && (
                               <span className="text-xs font-medium text-accent bg-accent/10 px-3 py-1.5 rounded-full">
                                 Shortlisted
                               </span>
                             )}
+
                             {job.status === "published" &&
                               (proposal.status === "submitted" ||
                                 proposal.status === "shortlisted") && (
@@ -320,11 +323,13 @@ export default async function JobDetailPage({ params }: JobDetailPageProps) {
                                   </button>
                                 </form>
                               )}
+
                             {proposal.status === "accepted" && (
                               <span className="text-xs font-semibold text-success bg-success/10 px-3 py-1.5 rounded-full">
                                 Hired
                               </span>
                             )}
+
                             <span className="text-xs text-text-tertiary ml-auto">
                               Submitted{" "}
                               {new Date(proposal.created_at).toLocaleDateString(
